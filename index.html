@@ -267,9 +267,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:14px;color:var(--text);ba
     <button class="login-btn" onclick="tryLogin()">Access Portal</button>
     <div class="login-err" id="login-err"></div>
     <div class="login-conf">&#128274; Confidential · Authorised Access Only</div>
-    <div class="login-conf login-copyright">
-    &copy; By Ravi Prakash. Proprietary Software. Unauthorized copying, distribution, or modification is prohibited | 2026.
-</div>
+     <div class="login-conf login-copyright"> &copy; By Ravi Prakash. Proprietary Software. Unauthorized copying, distribution, or modification is prohibited | 2026. </div>
   </div>
 </div>
 
@@ -389,8 +387,8 @@ const DATA = [{"Segment":"Auto Components","Phase / Source":"Phase 1 — Section
 const SEGMENTS = ["Agricultural Machinery", "Auto - Commercial (LCV_MCV)", "Auto - Passenger (LMV)", "Auto Components", "Bus Body", "Cleaning Equipment", "Construction Equipment", "Cranes & Hoists", "Elevator & Escalator", "Fencing", "Food Processing", "Formwork & Scaffolding", "Greenhouse", "HVAC", "Home Appliances", "ISO Freight Containers", "Interior Fittings", "Metal Hooks & Hardware", "Mezzanine Floor", "Mounting Structures", "Parking Systems", "Power Transmission", "Road Safety", "Shipbuilding", "Steel Traders", "Storage Technology", "Sun Shading", "Textile Machinery", "Trucks & Trailers", "Wind Energy", "Windows & Facades"];
 const REGIONS = ["Central", "EAST", "East", "East/Central", "East/South", "East/West", "Multi", "Multi-region", "NE", "NORTH", "National", "North", "North/Central", "North/South", "North/West", "SOUTH", "See Row 6", "South", "South/Central", "South/Multi", "South/North", "South/West", "Various", "WEST", "West", "West / National", "West/North", "West/South"];
 const COLUMNS = ["Segment", "Phase / Source", "S.No", "Company Name", "CIN", "GSTIN", "Legal Form", "Year Est.", "Parent / Group", "Revenue (Rs. Cr)", "Revenue Source", "Revenue Band", "Employees", "Employee Source", "Plant Count", "Plant Locations", "HQ Address", "Director Name", "Director Contact", "Procurement Head", "Proc. Contact", "Sales / BD Head", "Sales Contact", "Primary Segment", "Products", "Coil-to-Component", "In-house Roll Forming", "HSN Codes", "Steel Types", "Strategic Fit H/M/L", "Volume L/M/H", "Total Volume Produced", "Roll-Form Source", "Relationship Status", "Priority Tier", "Region", "BD Notes", "MIF Proximity (km est.)", "Customer OEMs Served", "IATF Certified?", "Key Products for MIF", "Entry Route", "Action Owner", "Data Confidence", "Last Verified Date", "Verification Method", "Source Hyperlink(s)", "Estimated vs Verified Flag", "EBITDA or PAT (Rs. Cr)", "Revenue Growth YoY / 3-yr CAGR", "Capex Announced (Last 24 months)", "Current Steel Suppliers", "Approximate Annual Steel Tonnage (TPA)", "Buying Pattern", "Competitor Tier", "Switching Difficulty", "Vendor Registration Status with MIF"];
-const TIMESTAMP = "29 Jun 2026, 04:11 AM";
-const SIMPLE_PASSWORD = "MIF2026";
+const TIMESTAMP = "29 Jun 2026, 03:44 PM";
+const PASS_HASH = "d88483da1aa45159bbd7544170294b5d84b44571c6027358c8dfe51e730a8cbc";
 const SEG_COUNTS = {"Auto Components": 59, "Bus Body": 40, "Construction Equipment": 40, "Elevator & Escalator": 40, "Formwork & Scaffolding": 40, "Greenhouse": 45, "HVAC": 40, "Mezzanine Floor": 37, "Trucks & Trailers": 30, "Storage Technology": 39, "Parking Systems": 16, "Mounting Structures": 50, "Auto - Passenger (LMV)": 60, "Auto - Commercial (LCV_MCV)": 44, "Windows & Facades": 36, "Interior Fittings": 30, "Cranes & Hoists": 32, "Home Appliances": 40, "Food Processing": 30, "Textile Machinery": 27, "Road Safety": 25, "Power Transmission": 30, "Wind Energy": 23, "Agricultural Machinery": 28, "Metal Hooks & Hardware": 20, "ISO Freight Containers": 16, "Shipbuilding": 15, "Sun Shading": 15, "Cleaning Equipment": 15, "Fencing": 16, "Steel Traders": 19};
 const TIER_COUNTS = {"T2 Conversion Possible": 394, "Pure Prospect": 235, "Unknown — Verify": 33, "T1 Captive": 152, "T1 Captive (in-house press shops)": 1, "T1 Captive (press + roll forming)": 1, "T1 OEM — MIF supplying roll-formed body sections to Tata CV body assembly": 1, "T1 OEM — CRCA roll-formed cab/body sections for Eicher Pro series trucks": 1, "T2 Conversion Possible — Force Motors buys CRCA body sections; niche LCV maker, accessible procurement": 1, "T1 OEM — CRCA/HSLA roll-formed cab and body sections for BharatBenz truck range": 1, "T1 Active Prospect — HIGHEST PRIORITY in LCV/MCV segment given Hosakote proximity": 1, "T2 Conversion Possible — Piaggio buys CRCA/HR for 3W + LCV body frames; accessible private procurement": 1, "Not applicable — L fit; exclude from active BD pipeline for LCV/MCV segment": 1, "Pure Prospect — verify entity identity first": 1, "Pure Prospect — M fit; forging primary, limited CRCA section demand": 1, "Not applicable — L fit for CRCA/HR coil supply": 1, "T2 Conversion Possible — M&M MTBD buys CRCA for MCV body sections; Zaheerabad AP plant ~450km is closer approach": 1, "T1 OEM (bus division) — CRCA roll-formed bus body structural sections": 1, "T1 Active Prospect — EV bus body sections (CRCA/HSLA) are growing rapidly; Olectra is India's top e-bus supplier": 1, "T2 Conversion Possible — growing EV bus/LCV program; new platform builds offer vendor onboarding opportunity": 1, "Pure Prospect — L LCV/MCV fit; monitor PV segment instead": 1, "T3 Small": 56, "Relationship Contact (co-located) — not a direct MIF steel sale": 1, "Not applicable — aluminium": 8, "T1 Active Prospect — uPVC reinforcement insert angle": 1, "Franchise Fabricator Network — approach fabricators, not Tata Steel HQ": 1, "T2 Conversion Possible — via South India fabricators": 1, "Pure Prospect — aluminium primary": 1, "T2 Conversion Possible — uPVC reinforcement insert angle": 1, "T1 Active Prospect — South India proximity (Chennai 350km)": 1, "T1 Active Prospect — pending MCA location confirmation": 1, "T1 Active Prospect — pending MCA confirmation": 1, "T2 Conversion Possible — South proximity": 1, "T1 Active Prospect — Bangalore proximity": 1, "T1 Active Prospect": 7, "Not applicable — see Home Appliances segment": 1, "T2 Conversion Possible — if India manufacturing begins": 1, "Not applicable": 4, "T1 Active Prospect — proximity (Bangalore)": 1, "T1 OEM": 10, "T1 Active Prospect — WALK-IN PRIORITY (Jalahalli Cross Bangalore 15-20km)": 1, "Not applicable — see Power Transmission segment for T&D division": 1, "Not applicable as food machinery OEM": 1, "Not applicable — non-OEM": 1, "See Auto LMV segment": 1, "Not applicable in Food Processing context": 2, "T1 Active Prospect — South proximity": 1, "T1 Active Prospect — WALK-IN PRIORITY (Peenya Bangalore 15-20km)": 1, "T1 Captive (they roll-form in-house)": 1, "T1 EPC Contractor": 1, "Not applicable — wire rod, not flat steel": 1, "T1 Active Prospect — PROXIMITY (Tumkur 70km)": 1, "Not applicable — forgings": 1, "Not applicable — castings/gearboxes": 1, "T1 Active Prospect — PROXIMITY (Hosur 45km)": 1, "T1 Active Prospect — PROXIMITY (25km Doddaballapur)": 1, "Pure Prospect — L fit": 1, "T1 Active Prospect — WALK-IN PRIORITY (Whitefield 20km)": 1, "T1 Active Prospect — proximity (Hosur 45km)": 1, "T1 Active Prospect — South India proximity (Vizag 500km)": 1, "Pure Prospect — entity needs confirmation": 1, "T2 Conversion Possible — pending confirmation": 1, "T1 Active Prospect — South proximity (Kochi 350km)": 1, "Not applicable in Shipbuilding context": 1, "T1 PSU Defence Shipyard": 2, "Not applicable — under insolvency": 1, "T1 Active Prospect — pending confirmation": 1, "Channel Partner / Competitor Analysis": 10};
 const REG_COUNTS = {"SOUTH": 193, "WEST": 245, "NORTH": 190, "EAST": 43, "SEE ROW 6": 1, "SOUTH/WEST": 9, "SOUTH/NORTH": 2, "WEST/NORTH": 7, "NORTH/WEST": 15, "NORTH/SOUTH": 5, "EAST/WEST": 4, "EAST/CENTRAL": 3, "MULTI-REGION": 1, "VARIOUS": 16, "NATIONAL": 13, "WEST / NATIONAL": 1, "WEST/SOUTH": 12, "MULTI": 65, "SOUTH/CENTRAL": 1, "CENTRAL": 9, "NORTH/CENTRAL": 2, "EAST/SOUTH": 2, "SOUTH/MULTI": 1, "NE": 1};
@@ -403,21 +401,22 @@ let state = {
 };
 
 // ── LOGIN ─────────────────────────────────────────────────────────
-function tryLogin() {
-  try {
-    const pwd = document.getElementById('pwd-input').value;
-    if (!pwd) { setErr('Please enter password'); return; }
-    if (pwd === SIMPLE_PASSWORD) {
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
-      initApp();
-    } else {
-      setErr('Incorrect password. Please try again.');
-      document.getElementById('pwd-input').value = '';
-      document.getElementById('pwd-input').focus();
-    }
-  } catch (err) {
-    setErr('Unable to sign in. Please open this downloaded file in Chrome or Safari.');
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function tryLogin() {
+  const pwd = document.getElementById('pwd-input').value;
+  if (!pwd) { setErr('Please enter password'); return; }
+  const h = await sha256(pwd);
+  if (h === PASS_HASH) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    initApp();
+  } else {
+    setErr('Incorrect password. Please try again.');
+    document.getElementById('pwd-input').value = '';
+    document.getElementById('pwd-input').focus();
   }
 }
 function setErr(msg) {
