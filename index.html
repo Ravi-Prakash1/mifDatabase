@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23ff8a3d'/%3E%3Cstop offset='1' stop-color='%23c85a1e'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg transform='rotate(45 50 50)'%3E%3Crect x='20' y='20' width='60' height='60' rx='15' fill='url(%23g)'/%3E%3Crect x='39' y='39' width='22' height='22' rx='5' fill='%230b1020'/%3E%3C/g%3E%3C/svg%3E">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MIF Market Research</title>
+<title>MIF Market Research By Ravi Prakash</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -30,7 +31,34 @@ button{font-family:inherit}
 a{color:var(--steel)}
 @keyframes fade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @keyframes glow{0%,100%{opacity:.45}50%{opacity:.8}}
-
+/* ── Login shimmer ─────────────────────────────────────────── */
+.login-name{
+  background:linear-gradient(100deg,
+    #eef3fb 0%, #eef3fb 38%,
+    #ffffff 90%,                 /* bright sweep */
+    #eef3fb 62%, #eef3fb 100%);
+  background-size:220% 100%;
+  -webkit-background-clip:text;   background-clip:text;
+  -webkit-text-fill-color:transparent;   color:transparent;
+  animation:mifShimmer 0.6s ease-in-out infinite;
+}
+.login-tag{
+  background:linear-gradient(100deg,
+    var(--accent) 0%, var(--accent) 18%,
+    #ffd9b0 50%,                 /* warm highlight on the accent */
+    var(--accent) 62%, var(--accent) 100%);
+  background-size:220% 100%;
+  -webkit-background-clip:text;   background-clip:text;
+  -webkit-text-fill-color:transparent;   color:transparent;
+  animation:mifShimmer 1.6s ease-in-out infinite .5s;  /* slight offset */
+}
+@keyframes mifShimmer{
+  0%   {background-position:130% 0}
+  100% {background-position:-30% 0}
+}
+@media (prefers-reduced-motion:reduce){
+  .login-name,.login-tag{animation:none}
+}
 /* LOGIN */
 #login{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
   background:radial-gradient(1200px 700px at 50% -10%,#141f36 0%,#0a0f1c 55%,#060911 100%);overflow:hidden}
