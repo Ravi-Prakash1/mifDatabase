@@ -79,6 +79,39 @@ If you want to change the password:
     python generate_dashboard.py --password NewPassword123
 
 
+AUTOMATED DAILY UPDATES (NEW)
+─────────────────────────────────────────────
+The portal can now refresh itself. A scheduled GitHub Action
+(.github/workflows/auto-update.yml) runs every morning (~08:00 IST) and:
+
+  1. Pulls fresh market news from free news feeds (Google News + industry
+     RSS) and the USD/INR rate, then uses Claude to summarise the items that
+     matter to MIF into MIF_News_Intelligence.xlsx.
+  2. Fills MISSING prospect/exhibition fields via online search — only empty
+     cells are touched, each filled value is flagged "Estimated", carries a
+     source link, and is recorded in the "Fill Audit Log" sheet.
+  3. Regenerates index.html and opens a PULL REQUEST for you to review.
+
+Nothing goes live automatically. You review the PR, edit anything that looks
+off, and merge — merging deploys the portal to GitHub Pages as before.
+
+ONE-TIME SETUP — Anthropic API key:
+  1. Create a key at https://console.anthropic.com
+  2. In GitHub: repo Settings -> Secrets and variables -> Actions ->
+     New repository secret, name it exactly:  ANTHROPIC_API_KEY
+  3. (Optional) run the workflow on demand from the Actions tab
+     ("Auto-update portal") to test it.
+
+Cost is bounded by per-run caps (news story count + companies enriched per
+day), so a full data backfill happens gradually over many days.
+
+RUN THE AUTOMATION LOCALLY (optional):
+  pip install -r requirements.txt
+  python scripts/fetch_news.py --dry-run          # preview news, no writes
+  python scripts/enrich_data.py --dry-run --limit 5
+  export ANTHROPIC_API_KEY=sk-...                 # then drop --dry-run to write
+
+
 SHARING WITH OTHERS
 ─────────────────────────────────────────────
 Share ONLY the MIF_Intelligence_Portal.html file.
