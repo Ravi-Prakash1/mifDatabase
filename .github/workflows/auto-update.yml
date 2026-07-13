@@ -1,0 +1,100 @@
+# Auto-update the MIF portal: pull market news + enrich missing data, rebuild
+# index.html, and open a Pull Request for human review. Merging the PR triggers
+# the existing "Deploy static content to Pages" workflow (static.yml).
+#
+# Nothing here deploys directly — a person always reviews the PR first.
+name: Auto-update portal (news + enrichment)
+
+on:
+  schedule:
+    # 02:30 UTC ≈ 08:00 IST, every day.
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      max_stories:
+        description: "Max news stories in today's edition"
+        default: "10"
+      enrich_limit:
+        description: "Companies to enrich this run (0 = skip)"
+        default: "10"
+      exhibitions_limit:
+        description: "Exhibitions to enrich this run (0 = skip)"
+        default: "5"
+      discover_limit:
+        description: "New companies to discover + add this run (0 = skip)"
+        default: "10"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: "auto-update"
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch market news
+        env:
+          # FREE engine. Set GROQ_API_KEY as a repo secret for AI summaries; if
+          # unset, the script auto-falls back to rule-based drafting (no key).
+          MIF_LLM_PROVIDER: ${{ vars.MIF_LLM_PROVIDER || 'auto' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/fetch_news.py --max-stories "${{ github.event.inputs.max_stories || '10' }}"
+
+      - name: Enrich missing data
+        env:
+          MIF_LLM_PROVIDER: ${{ vars.MIF_LLM_PROVIDER || 'auto' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python scripts/enrich_data.py \
+            --limit "${{ github.event.inputs.enrich_limit || '10' }}" \
+            --exhibitions-limit "${{ github.event.inputs.exhibitions_limit || '5' }}"
+
+      - name: Discover new companies
+        env:
+          MIF_LLM_PROVIDER: ${{ vars.MIF_LLM_PROVIDER || 'auto' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/discover_companies.py --limit "${{ github.event.inputs.discover_limit || '10' }}"
+
+      - name: Rebuild portal HTML
+        run: python generate_portal_v7_News.py --output index.html
+
+      - name: Open review Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: auto/market-update
+          base: main
+          commit-message: "chore: auto-update market news + enriched data"
+          title: "Auto-update: market news + data enrichment"
+          body: |
+            Automated daily refresh — **please review before merging**.
+
+            - 📰 New market-news edition appended to `MIF_News_Intelligence.xlsx`
+            - 🔎 Missing prospect/exhibition fields enriched (flagged `Estimated`,
+              each with a source in `Source Hyperlink(s)` and a `Fill Audit Log` row)
+            - 🏢 Newly-discovered companies added to `Master Database`, flagged
+              **`Needs Verification`** — confirm these before any outreach
+            - 🖥️ `index.html` regenerated from the updated data
+
+            Check the news headlines, enriched values, and any **new companies**
+            for accuracy. Merging this PR triggers the GitHub Pages deploy.
+          labels: |
+            automated
+            needs-review
