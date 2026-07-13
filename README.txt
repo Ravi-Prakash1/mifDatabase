@@ -110,7 +110,21 @@ HOW THE NEWS IS SUMMARISED (pick one — all free):
     headlines with keyword rules, and you fill the "Why it matters" notes in the
     review PR. Fully private, zero setup.
 
-COVERAGE NOTE (enrichment):
+NEW-COMPANY DISCOVERY:
+  The daily job also looks for companies NOT yet in your database — from the
+  market news, from exhibition exhibitor lists, and from Wikidata by segment.
+  A candidate is only added if it (a) is genuinely new (not already in the
+  sheet), (b) is confirmed a real company in a free source (Wikidata/GLEIF),
+  and (c) clearly belongs to one of MIF's 38 end-use segments (this keeps out
+  steel mills and other off-target names). New rows are appended to the Master
+  Database with identity fields filled and everything else blank, flagged
+  "Needs Verification" — NOTHING is auto-marked Verified. Confirm each new
+  company (and fill its financials/contacts) before any outreach.
+
+  Enrichment is prioritised by BD value: existing customers first, then
+  Tier 1 / T1 Captive-OEM, Active Prospects, Tier 2 conversion, then the rest.
+
+COVERAGE NOTE:
   Free company data mainly covers larger, well-known firms. Small/obscure
   prospects usually won't be found and their cells simply stay empty for you to
   fill by hand — the tool never guesses. Per-run caps mean a full backfill fills

@@ -20,6 +20,9 @@ on:
       exhibitions_limit:
         description: "Exhibitions to enrich this run (0 = skip)"
         default: "5"
+      discover_limit:
+        description: "New companies to discover + add this run (0 = skip)"
+        default: "10"
 
 permissions:
   contents: write
@@ -63,6 +66,13 @@ jobs:
             --limit "${{ github.event.inputs.enrich_limit || '10' }}" \
             --exhibitions-limit "${{ github.event.inputs.exhibitions_limit || '5' }}"
 
+      - name: Discover new companies
+        env:
+          MIF_LLM_PROVIDER: ${{ vars.MIF_LLM_PROVIDER || 'auto' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/discover_companies.py --limit "${{ github.event.inputs.discover_limit || '10' }}"
+
       - name: Rebuild portal HTML
         run: python generate_portal_v7_News.py --output index.html
 
@@ -79,10 +89,12 @@ jobs:
             - 📰 New market-news edition appended to `MIF_News_Intelligence.xlsx`
             - 🔎 Missing prospect/exhibition fields enriched (flagged `Estimated`,
               each with a source in `Source Hyperlink(s)` and a `Fill Audit Log` row)
+            - 🏢 Newly-discovered companies added to `Master Database`, flagged
+              **`Needs Verification`** — confirm these before any outreach
             - 🖥️ `index.html` regenerated from the updated data
 
-            Check the news headlines and any enriched values for accuracy. Merging
-            this PR triggers the GitHub Pages deploy.
+            Check the news headlines, enriched values, and any **new companies**
+            for accuracy. Merging this PR triggers the GitHub Pages deploy.
           labels: |
             automated
             needs-review

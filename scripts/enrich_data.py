@@ -176,12 +176,14 @@ def _gleif_facts(name):
     if not data:
         return {}
     rec = data[0]
-    addr = (rec.get("attributes", {}).get("entity", {}) or {}).get("legalAddress", {}) or {}
+    entity = (rec.get("attributes", {}).get("entity", {}) or {})
+    addr = entity.get("legalAddress", {}) or {}
     parts = list(addr.get("addressLines", []) or []) + [
         addr.get("city", ""), addr.get("region", ""), addr.get("postalCode", ""),
         addr.get("country", "")]
     hq = ", ".join(p for p in parts if p)
-    out = {"_source": f"https://search.gleif.org/#/record/{rec.get('id','')}"}
+    out = {"_source": f"https://search.gleif.org/#/record/{rec.get('id','')}",
+           "_name": (entity.get("legalName", {}) or {}).get("name", "")}
     if hq:
         out["hq"] = hq
     return out
@@ -210,10 +212,14 @@ def enrich_company(name, context, fields):
 
 # ─── PROSPECTS ────────────────────────────────────────────────────────────────
 def select_prospect_rows(ws, hmap, limit):
-    """Rank non-verified rows by how many allow-listed fields are empty."""
+    """Rank non-verified rows by BD value first (customers -> Tier 1 -> Active
+    Prospects -> Tier 2 -> rest), then by how many allow-listed fields are empty."""
+    import mif_context as ctx
     flag_col = hmap.get(mc.COL_EST_FLAG)
     name_col = hmap[mc.COL_COMPANY_NAME]
     enrich_cols = [(f, hmap[f]) for f in mc.ENRICHABLE_PROSPECT_FIELDS if f in hmap]
+    # Columns bd_score reads, resolved once.
+    score_cols = ("Relationship Status", "Competitor Tier", "Priority Tier")
 
     ranked = []
     for r in range(2, ws.max_row + 1):
@@ -223,10 +229,13 @@ def select_prospect_rows(ws, hmap, limit):
         if flag_col and mc.is_verified(ws.cell(r, flag_col).value):
             continue
         missing = [f for f, c in enrich_cols if mc.is_empty(ws.cell(r, c).value)]
-        if missing:
-            ranked.append((len(missing), r, str(name).strip(), missing))
-    ranked.sort(reverse=True)
-    return ranked[:limit]
+        if not missing:
+            continue
+        row = {k: ws.cell(r, hmap[k]).value for k in score_cols if k in hmap}
+        ranked.append((ctx.bd_score(row), len(missing), r, str(name).strip(), missing))
+    ranked.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    # Drop the score field so the return shape stays (miss, row, name, fields).
+    return [(m, r, n, f) for _, m, r, n, f in ranked[:limit]]
 
 
 def context_for(ws, hmap, row):
@@ -245,7 +254,7 @@ def enrich_prospects(opts):
     hmap = header_map(ws)
     targets = select_prospect_rows(ws, hmap, opts["limit"])
     mc.log(f"Prospects: {len(targets)} companies selected for enrichment "
-           f"(most-empty first, cap {opts['limit']}).")
+           f"(BD-value priority, cap {opts['limit']}).")
 
     if opts["dry_run"]:
         for miss, r, name, fields in targets:

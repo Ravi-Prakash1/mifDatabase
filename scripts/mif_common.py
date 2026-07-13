@@ -31,8 +31,9 @@ PROSPECTS_FILE   = os.path.join(REPO_ROOT, "MIF_Prospects_Master_Database.xlsx")
 EXHIBITIONS_FILE = os.path.join(REPO_ROOT, "MIF_Global_Exhibitions_FY_2026_27.xlsx")
 NEWS_FILE        = os.path.join(REPO_ROOT, "MIF_News_Intelligence.xlsx")
 
-DATA_DIR         = os.path.join(REPO_ROOT, "data")
-NEWS_SEEN_FILE   = os.path.join(DATA_DIR, "news_seen.json")
+DATA_DIR             = os.path.join(REPO_ROOT, "data")
+NEWS_SEEN_FILE       = os.path.join(DATA_DIR, "news_seen.json")
+DISCOVERED_SEEN_FILE = os.path.join(DATA_DIR, "discovered_seen.json")
 
 # ─── EXCEL SCHEMA CONTRACT ────────────────────────────────────────────────────
 # These MUST match what generate_portal_v7_News.py::parse_news() reads. Do not
@@ -147,6 +148,55 @@ def mark_seen(seen_set, headline, link):
         return False
     seen_set.add(k)
     return True
+
+
+# ─── COMPANY-NAME NORMALISATION & INDEX (dedup for enrichment + discovery) ────
+# Strip legal suffixes / punctuation so "Ashok Leyland Ltd." == "Ashok Leyland Ltd"
+# == "ashok leyland limited". Used to match candidates against the existing DB.
+_SUFFIX_RE = re.compile(
+    r"\b(pvt|private|ltd|limited|llp|inc|incorporated|co|corp|corporation|"
+    r"company|and|the)\b", re.I)
+
+
+def normalize_name(name):
+    if is_empty(name):
+        return ""
+    s = str(name).lower()
+    s = re.sub(r"[.\,&/()\-]", " ", s)
+    s = _SUFFIX_RE.sub(" ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def db_name_index(prospects_file=None):
+    """Return a set of normalised company names already in the Master Database,
+    so both enrichment and discovery can skip / avoid re-adding them."""
+    import pandas as pd
+    path = prospects_file or PROSPECTS_FILE
+    try:
+        df = pd.read_excel(path, sheet_name=PROSPECTS_SHEET)
+    except Exception as e:
+        log(f"db_name_index: could not read prospects: {e}")
+        return set()
+    return {normalize_name(v) for v in df[COL_COMPANY_NAME].tolist()
+            if not is_empty(v)}
+
+
+# ─── DISCOVERED-COMPANY CACHE (mirror of the news seen-cache) ──────────────────
+def load_discovered():
+    """Return (set_of_normalised_names, raw_dict) of already-discovered companies."""
+    try:
+        with open(DISCOVERED_SEEN_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return set(data.get("names", [])), data
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set(), {"names": [], "updated": ""}
+
+
+def save_discovered(names):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    payload = {"names": sorted(names), "updated": today_iso()}
+    with open(DISCOVERED_SEEN_FILE, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
 
 
 # ─── KEYWORD / QUERY CONFIG (free Google News RSS + industry feeds) ───────────
