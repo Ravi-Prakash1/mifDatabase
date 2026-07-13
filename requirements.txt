@@ -1,13 +1,13 @@
 # MIF Market Intelligence Portal — automation dependencies
 #
 # The portal generator needs pandas + openpyxl to read the Excel sources.
-# The automation scripts add requests (free RSS + FX fetch; RSS is parsed with
-# the stdlib xml module, so no feedparser/sgmllib build is required) and the
-# Anthropic SDK (summarisation + web-search enrichment).
+# The automation scripts add only `requests`: it fetches the free RSS feeds
+# (parsed with the stdlib xml module — no feedparser/sgmllib build), the free
+# FX + Wikidata/GLEIF lookups, and the free LLM endpoints (Groq / Gemini) over
+# plain HTTP. No paid SDKs.
 #
 # Install:  pip install -r requirements.txt
 
 pandas>=2.0
 openpyxl>=3.1
 requests>=2.31
-anthropic>=0.40

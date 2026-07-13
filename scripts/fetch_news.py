@@ -7,7 +7,7 @@ Pipeline (all sources free):
      and a couple of industry RSS feeds.
   2. De-duplicate against data/news_seen.json so nothing is published twice.
   3. Fetch the USD/INR spot rate from a free, no-key FX endpoint.
-  4. Ask Claude (with the server-side web_search tool) to keep only the items
+  4. Summarise via a FREE engine (Groq/Gemini) — or, with no key, rule-based —
      relevant to MIF, verify them, and shape them into the exact sheet schema
      that generate_portal_v7_News.py::parse_news() reads. Every story keeps a
      real Source URL — unsourced items are dropped.
@@ -18,11 +18,12 @@ Nothing here deploys anything: the workflow opens a PR for human review.
 
 Usage:
     python scripts/fetch_news.py                 # fetch + write today's edition
-    python scripts/fetch_news.py --dry-run       # fetch + print candidates, no writes, no Claude
+    python scripts/fetch_news.py --dry-run       # fetch + print candidates, no writes, no LLM
     python scripts/fetch_news.py --max-stories 8 # cap the edition size (cost/length guard)
     python scripts/fetch_news.py --date 2026-07-13
 """
 
+import re
 import sys
 import time
 import urllib.parse
@@ -112,6 +113,7 @@ def fetch_feed(url):
                 "link": text(it, "link"),
                 "source": (src_el.text or "").strip() if src_el is not None and src_el.text else "",
                 "published": text(it, "pubDate"),
+                "summary": _strip_html(text(it, "description")),
             })
     else:
         ns = "{http://www.w3.org/2005/Atom}"
@@ -122,8 +124,23 @@ def fetch_feed(url):
                 "link": link_el.get("href", "") if link_el is not None else "",
                 "source": "",
                 "published": text(it, f"{ns}updated"),
+                "summary": _strip_html(text(it, f"{ns}summary")),
             })
     return entries
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(s):
+    """Google News descriptions are HTML fragments; reduce to plain text."""
+    if not s:
+        return ""
+    txt = _TAG_RE.sub(" ", s)
+    txt = (txt.replace("&nbsp;", " ").replace("&amp;", "&")
+              .replace("&lt;", "<").replace("&gt;", ">").replace("&#39;", "'")
+              .replace("&quot;", '"'))
+    return re.sub(r"\s+", " ", txt).strip()
 
 
 def gather_candidates(opts):
@@ -149,7 +166,7 @@ def gather_candidates(opts):
             batch_keys.add(k)
             candidates.append({
                 "title": title, "link": link, "source": e.get("source", ""),
-                "published": e.get("published", ""),
+                "published": e.get("published", ""), "summary": e.get("summary", ""),
             })
         time.sleep(0.2)                                  # be polite to feeds
     candidates = candidates[: opts["max_candidates"]]
@@ -169,27 +186,59 @@ def fetch_usd_inr():
         return None
 
 
-# ─── CLAUDE SHAPING ───────────────────────────────────────────────────────────
+# ─── SEGMENT / STATUS KEYWORD RULES (shared by LLM and rule-based modes) ──────
+# Ordered: first match wins. Each entry -> (section, segment).
+_SEGMENT_RULES = [
+    (("hr coil", "hrc", "hot-rolled", "coil price", "steel price", "steel cos",
+      "steelmaker", "steel prices", "scrap", "iron ore", "safeguard", "billet",
+      "rebar", "import duty", "steel export", "steel import"), ("Input Cost", "Steel")),
+    (("elevator", "lift", "escalator"), ("Segment", "Elevator")),
+    (("solar", "module mounting", "renewable", "power"), ("Segment", "Power / Solar")),
+    (("tata motors", "maruti", "mahindra", "automobile", "auto ", "vehicle",
+      "ev ", "two-wheeler", "commercial vehicle", "oem"), ("Customer Health", "Automotive")),
+    (("construction", "infrastructure", "real estate", "building", "cement"),
+     ("Segment", "Construction")),
+    (("tube", "pipe"), ("Segment", "Tubes & Pipes")),
+    (("roll forming", "roll-forming", "cold roll"), ("Competitor", "Roll Forming")),
+]
+_HIGH_WORDS = ("hike", "surge", "shutdown", "closure", "crisis", "record",
+               "safeguard", "layoff", "dumping", "ban", "high", "cut", "slump")
+_PRICE_RE = re.compile(r"₹\s?\d[\d,]{3,}")
+
+
+def _classify(text):
+    t = text.lower()
+    for kws, (section, segment) in _SEGMENT_RULES:
+        if any(k in t for k in kws):
+            return section, segment
+    return "Update", "—"
+
+
+def _status_for(text):
+    return "High" if any(w in text.lower() for w in _HIGH_WORDS) else "Medium"
+
+
+# ─── LLM SHAPING (free provider) ──────────────────────────────────────────────
 _SYSTEM = (
     "You are the market-intelligence editor for Mother India Forming (MIF), an "
-    "Indian roll-forming and steel-component manufacturer. You turn raw news "
-    "headlines into a concise daily briefing for MIF's BD and procurement teams. "
-    "Rules: report only facts you can confirm; every story MUST carry a real "
-    "source URL; if you cannot verify an item, drop it; be terse and factual."
+    "Indian roll-forming and steel-component manufacturer, briefing MIF's BD and "
+    "procurement teams. Summarise ONLY from the headline text provided below — do "
+    "NOT invent facts, numbers, or events not present in that text. Keep each "
+    "story's real source URL. Be terse and factual. Output valid JSON only."
 )
 
 
 def build_prompt(candidates, date, max_stories):
-    lines = [f"- {c['title']}  ({c['source']})  {c['link']}" for c in candidates]
+    lines = [f"- TITLE: {c['title']}\n  SUMMARY: {c.get('summary','')}\n  "
+             f"SOURCE: {c['source']}  URL: {c['link']}" for c in candidates]
     headlines = "\n".join(lines) if lines else "(no fresh headlines today)"
-    return f"""Today is {date}. Below are fresh news headlines relevant to the Indian
-steel / roll-forming / auto-component / construction market. Use web_search to
-verify and expand the ones that genuinely matter to MIF (steel input costs,
-customer/OEM health, competitor moves, demand in MIF's segments, new prospects).
-
-Return ONLY a single ```json code block with this shape:
+    return f"""Today is {date}. Below are fresh, de-duplicated news items for the Indian
+steel / roll-forming / auto-component / construction market. Select the items that
+genuinely matter to MIF (steel input costs, customer/OEM health, competitor moves,
+demand in MIF's segments, new prospects) and shape them — using ONLY the text
+given — into JSON with exactly this shape:
 {{
-  "briefing": {{"type": "Daily", "note": "<3-5 sentence procurement/BD briefing on steel input costs and what to do>"}},
+  "briefing": {{"type": "Daily", "note": "<3-5 sentence procurement/BD briefing on steel input costs and what to watch>"}},
   "indicators": [
     {{"name": "HR Coil", "value": "<e.g. Rs 54,800-60,450>", "unit": "/ton",
       "movement": "Up|Down|Stable", "driver": "<short driver>", "source": "<publisher + url>"}}
@@ -200,37 +249,91 @@ Return ONLY a single ```json code block with this shape:
       "status": "High|Medium|Low",
       "company": "<company or —>",
       "headline": "<one-line headline>",
-      "what": "<2-3 sentence what happened>",
+      "what": "<2-3 sentence what happened, from the summary>",
       "why": "<why it matters to MIF, 1-2 sentences>",
-      "source": "<publisher name + url>",
+      "source": "<publisher name + url from the item>",
       "importance": "High|normal",
       "marquee": "Y or blank (Y = show in the scrolling ticker; use sparingly)",
       "dashboard": "Y or blank (Y = surface on the dashboard)"}}
   ]
 }}
 
-Keep at most {max_stories} stories, ranked by importance to MIF. Include 3-6
-indicators (HR Coil, MS Scrap, USD/INR, iron ore, etc. — only ones you can
-source). Headlines to consider:
+Keep at most {max_stories} stories, ranked by importance to MIF. Only add an
+indicator if a price/number appears in the text. News items:
 {headlines}
 """
 
 
-def shape_edition(candidates, date, max_stories):
-    """Ask Claude to produce the structured edition. Returns dict or None."""
+def shape_edition_llm(candidates, date, max_stories):
+    """Free-LLM path (groq/gemini). Returns dict or None on any failure."""
     prompt = build_prompt(candidates, date, max_stories)
     try:
-        data = mc.claude_json(prompt, use_web_search=True, max_tokens=6000, system=_SYSTEM)
-    except mc.ClaudeUnavailable as e:
-        mc.log(f"Claude unavailable ({e}) — cannot shape edition")
+        data = mc.llm_json(prompt, system=_SYSTEM, max_tokens=6000)
+    except mc.LLMUnavailable as e:
+        mc.log(f"LLM unavailable ({e})")
         return None
     except Exception as e:
-        mc.log(f"Claude shaping failed: {e}")
+        mc.log(f"LLM shaping failed: {e}")
         return None
-    if not isinstance(data, dict):
-        mc.log("Claude returned unexpected shape — skipping")
-        return None
-    return data
+    return data if isinstance(data, dict) else None
+
+
+# ─── RULE-BASED SHAPING (zero-key fallback) ───────────────────────────────────
+def rule_based_edition(candidates, date, max_stories):
+    """Build an edition straight from RSS with keyword rules — no LLM, no key.
+    'Why It Matters' is intentionally left blank for the human to complete in the
+    review PR. Every story keeps its real source URL."""
+    # Rank: price/steel items and 'High' signal words first.
+    def score(c):
+        blob = f"{c['title']} {c.get('summary','')}"
+        s = 0
+        if _PRICE_RE.search(blob): s += 3
+        if _status_for(blob) == "High": s += 2
+        sect, _ = _classify(blob)
+        if sect != "Update": s += 1
+        return s
+    ranked = sorted(candidates, key=score, reverse=True)[:max_stories]
+
+    stories, indicators = [], []
+    for c in ranked:
+        blob = f"{c['title']} {c.get('summary','')}"
+        section, segment = _classify(blob)
+        src = (f"{c['source']} — " if c['source'] else "") + c['link']
+        stories.append({
+            "section": section, "segment": segment,
+            "status": _status_for(blob), "company": "—",
+            "headline": c['title'],
+            "what": c.get('summary', '') or c['title'],
+            "why": "",                                   # human fills in the PR
+            "source": src,
+            "importance": "High" if _status_for(blob) == "High" else "normal",
+            "marquee": "", "dashboard": ""})
+        # Capture a price mention as an HR-coil indicator when present.
+        m = _PRICE_RE.search(blob)
+        if m and any(k in blob.lower() for k in ("hr coil", "hrc", "hot-rolled", "steel")):
+            indicators.append({
+                "name": "HR Coil", "value": m.group(0).strip(), "unit": "/ton",
+                "movement": "Up" if "hike" in blob.lower() or "surge" in blob.lower() else "Stable",
+                "driver": c['title'][:80], "source": src})
+
+    note = ("Auto-drafted from market headlines (no AI summary configured). "
+            "Review the stories below and add the 'Why it matters to MIF' notes "
+            "before publishing.")
+    return {"briefing": {"type": "Daily", "note": note},
+            "indicators": indicators[:1], "stories": stories}
+
+
+def shape_edition(candidates, date, max_stories):
+    """Choose the free path: LLM if a provider is configured, else rule-based."""
+    if mc.llm_available():
+        mc.log(f"Shaping edition with LLM provider: {mc.resolve_provider()}")
+        data = shape_edition_llm(candidates, date, max_stories)
+        if data:
+            return data
+        mc.log("LLM path failed — falling back to rule-based drafting.")
+    else:
+        mc.log("No LLM provider configured — using rule-based drafting.")
+    return rule_based_edition(candidates, date, max_stories)
 
 
 # ─── EXCEL WRITE ──────────────────────────────────────────────────────────────
@@ -317,26 +420,27 @@ def write_edition(edition, date, usd_inr):
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 def main():
     opts = parse_args(sys.argv[1:])
-    mc.log(f"fetch_news — date={opts['date']} dry_run={opts['dry_run']}")
+    mc.log(f"fetch_news — date={opts['date']} provider={mc.resolve_provider()} "
+           f"dry_run={opts['dry_run']}")
 
     candidates, seen = gather_candidates(opts)
     usd_inr = fetch_usd_inr()
     mc.log(f"USD/INR = {usd_inr}")
 
     if opts["dry_run"]:
-        print("\n── Candidate stories that WOULD be sent to Claude ──")
+        print(f"\n── Candidate stories ({mc.resolve_provider()} mode) ──")
         for c in candidates:
             print(f"  • {c['title']}\n      {c['source']} — {c['link']}")
         print(f"\nUSD/INR indicator: {usd_inr}")
         print(f"\n{len(candidates)} candidates, cap {opts['max_stories']} stories/edition."
-              " No Claude call, no Excel write (dry-run).")
+              " No LLM call, no Excel write (dry-run).")
+        return
+
+    if not candidates:
+        mc.log("No new candidate stories today — nothing to write.")
         return
 
     edition = shape_edition(candidates, opts["date"], opts["max_stories"])
-    if not edition:
-        mc.log("No edition produced — leaving workbook and seen-cache unchanged.")
-        return
-
     n_stories, n_ind = write_edition(edition, opts["date"], usd_inr)
     mc.save_seen(seen)
     mc.log(f"Wrote {n_stories} stories, {n_ind} indicators to {mc.NEWS_FILE}")

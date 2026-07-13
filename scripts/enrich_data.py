@@ -9,11 +9,18 @@ Fill-only, never overwrite:
     "Estimated", stamped with today's date, and logged to the "Fill Audit Log"
     sheet (Company, Field, New Value, Method, Source, Date).
 
-Enrichment uses Claude with the server-side web_search tool. If no
-ANTHROPIC_API_KEY is set (or --dry-run), the script only reports which
-companies/fields it WOULD enrich and writes nothing.
+Enrichment uses FREE structured sources only — no paid API, no web scraping of
+search engines:
+  * Wikidata / Wikipedia (company website, founding year, HQ, parent, industry)
+  * GLEIF LEI records (legal name, legal form, registered HQ address)
+  * (optional) a free LLM provider (Groq/Gemini) to normalise the fetched text —
+    used only if MIF_LLM_PROVIDER / a key is configured; never required.
 
-Per-run caps keep cost/time bounded; a full backfill happens over many days.
+Coverage note: these sources mainly cover larger, well-known companies. Obscure
+SME prospects simply won't be found and their cells stay empty for a human.
+With --dry-run the script only reports which companies/fields it WOULD enrich.
+
+Per-run caps keep time bounded; a full backfill happens over many days.
 
 Usage:
     python scripts/enrich_data.py --dry-run --limit 3
@@ -27,8 +34,11 @@ import re
 import sys
 
 import openpyxl
+import requests
 
 import mif_common as mc
+
+_HTTP_HEADERS = {"User-Agent": "MIF-portal-enrichment/1.0 (contact: BI@mif)"}
 
 
 # ─── ARGS ─────────────────────────────────────────────────────────────────────
@@ -78,42 +88,123 @@ def ensure_audit_sheet(wb):
 
 def audit(ws_audit, company, field, value, source):
     ws_audit.append([company, field, value,
-                     "Claude web search (auto-enrich)", source, mc.today_iso()])
+                     "Free lookup (Wikidata/GLEIF, auto-enrich)", source, mc.today_iso()])
 
 
-# ─── CLAUDE ENRICHMENT CALL ───────────────────────────────────────────────────
-def enrich_company(name, context, fields):
-    """Ask Claude to find values for `fields` (list of column names) for one
-    company. Returns {field: {"value":..., "source":...}} for confirmed fields."""
-    field_lines = "\n".join(f"  - {f}" for f in fields)
-    ctx = "; ".join(f"{k}={v}" for k, v in context.items() if not mc.is_empty(v))
-    prompt = f"""Find verifiable, current facts about this Indian company and fill ONLY
-the fields you can confirm from a citable web source. Company: "{name}".
-Known context: {ctx or "(none)"}.
+# ─── FREE STRUCTURED-DATA LOOKUPS ─────────────────────────────────────────────
+_WD_API = "https://www.wikidata.org/w/api.php"
 
-Fields needed (leave out any you cannot confirm):
-{field_lines}
+# Wikidata property -> internal fact key. Q-id valued props get label-resolved.
+_WD_PROPS = {"P856": ("website", False), "P571": ("year", False),
+             "P159": ("hq", True), "P749": ("parent", True),
+             "P1454": ("legalform", True), "P452": ("industry", True)}
 
-Use web_search. Return ONLY a ```json object mapping each confirmed field name to
-{{"value": "<concise value>", "source": "<url you verified it from>"}}. Do not
-guess; if unsure, omit the field. Money in Rs. Cr where relevant. Example:
-```json
-{{"Company Website": {{"value": "example.com", "source": "https://example.com"}}}}
-```"""
+# Our column/label -> internal fact key. Several columns share a source fact.
+_FIELD_TO_FACT = {
+    "Company Website": "website", "Registration Website": "website",
+    "Year Est.": "year", "HQ Address": "hq", "Parent / Group": "parent",
+    "Legal Form": "legalform", "Products": "industry",
+}
+
+
+def _get(url, **params):
+    r = requests.get(url, params=params, headers=_HTTP_HEADERS, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+def _wikidata_facts(name):
+    """Return {fact_key: value} + a wikidata source URL, or {} if not found.
+    Only accepts a hit that carries at least one business-ish claim so we don't
+    match a person/place of the same name."""
     try:
-        data = mc.claude_json(prompt, use_web_search=True, max_tokens=3000)
-    except mc.ClaudeUnavailable as e:
-        raise
+        hits = _get(_WD_API, action="wbsearchentities", search=name, language="en",
+                    format="json", limit=1, type="item").get("search", [])
+        if not hits:
+            return {}
+        qid = hits[0]["id"]
+        ent = _get(_WD_API, action="wbgetentities", ids=qid, props="claims|labels",
+                   languages="en", format="json")["entities"][qid]
     except Exception as e:
-        mc.log(f"  enrich call failed for {name}: {e}")
+        mc.log(f"    wikidata lookup failed: {e}")
         return {}
-    if not isinstance(data, dict):
+
+    claims = ent.get("claims", {})
+    facts, label_ids = {}, {}
+    for pid, (key, is_item) in _WD_PROPS.items():
+        arr = claims.get(pid)
+        if not arr:
+            continue
+        snak = arr[0].get("mainsnak", {})
+        if snak.get("snaktype") != "value":
+            continue
+        val = snak["datavalue"]["value"]
+        if key == "year":
+            m = re.search(r"(\d{4})", val.get("time", "") if isinstance(val, dict) else str(val))
+            if m:
+                facts["year"] = m.group(1)
+        elif is_item:
+            label_ids[key] = val["id"]                    # resolve label below
+        else:
+            facts[key] = str(val).strip()                 # website: plain string
+
+    if not facts and not label_ids:
+        return {}                                         # top hit had no business claims
+    # Resolve all referenced Q-ids to English labels in one call.
+    if label_ids:
+        try:
+            ents = _get(_WD_API, action="wbgetentities", ids="|".join(label_ids.values()),
+                        props="labels", languages="en", format="json")["entities"]
+            for key, qv in label_ids.items():
+                lbl = ents.get(qv, {}).get("labels", {}).get("en", {}).get("value")
+                if lbl:
+                    facts[key] = lbl
+        except Exception as e:
+            mc.log(f"    wikidata label resolve failed: {e}")
+    facts["_source"] = f"https://www.wikidata.org/wiki/{qid}"
+    return facts
+
+
+def _gleif_facts(name):
+    """Return {hq, source} from the GLEIF LEI register, or {} if not found."""
+    try:
+        data = _get("https://api.gleif.org/api/v1/lei-records",
+                    **{"filter[entity.legalName]": name, "page[size]": 1}).get("data", [])
+    except Exception as e:
+        mc.log(f"    gleif lookup failed: {e}")
         return {}
-    # Keep only entries with both a value and a source.
+    if not data:
+        return {}
+    rec = data[0]
+    addr = (rec.get("attributes", {}).get("entity", {}) or {}).get("legalAddress", {}) or {}
+    parts = list(addr.get("addressLines", []) or []) + [
+        addr.get("city", ""), addr.get("region", ""), addr.get("postalCode", ""),
+        addr.get("country", "")]
+    hq = ", ".join(p for p in parts if p)
+    out = {"_source": f"https://search.gleif.org/#/record/{rec.get('id','')}"}
+    if hq:
+        out["hq"] = hq
+    return out
+
+
+def enrich_company(name, context, fields):
+    """Look up `fields` for one company/event using free structured sources.
+    Returns {field: {"value":..., "source":...}} only for fields we could fill.
+    `context` is accepted for signature compatibility (unused by free lookups)."""
+    wd = _wikidata_facts(name)
+    gl = _gleif_facts(name) if any(f in ("HQ Address", "Legal Form") for f in fields) else {}
+
     out = {}
-    for f, v in data.items():
-        if f in fields and isinstance(v, dict) and v.get("value") and v.get("source"):
-            out[f] = {"value": str(v["value"]).strip(), "source": str(v["source"]).strip()}
+    for field in fields:
+        key = _FIELD_TO_FACT.get(field)
+        if not key:
+            continue
+        # HQ Address: prefer GLEIF's full registered address over Wikidata's city.
+        if field == "HQ Address" and gl.get("hq"):
+            out[field] = {"value": gl["hq"], "source": gl["_source"]}
+            continue
+        if key in wd and wd[key]:
+            out[field] = {"value": wd[key], "source": wd["_source"]}
     return out
 
 
@@ -159,7 +250,7 @@ def enrich_prospects(opts):
     if opts["dry_run"]:
         for miss, r, name, fields in targets:
             print(f"  • {name} (row {r}) — {miss} empty fields: {', '.join(fields)}")
-        print("\nDry-run: no Claude calls, no writes.")
+        print("\nDry-run: no lookups, no writes.")
         return 0
 
     ws_audit = ensure_audit_sheet(wb)
@@ -171,13 +262,9 @@ def enrich_prospects(opts):
 
     filled_total = 0
     for _, r, name, fields in targets:
-        try:
-            found = enrich_company(name, context_for(ws, hmap, r), fields)
-        except mc.ClaudeUnavailable as e:
-            mc.log(f"Claude unavailable ({e}) — stopping prospect enrichment.")
-            break
+        found = enrich_company(name, context_for(ws, hmap, r), fields)
         if not found:
-            mc.log(f"  {name}: nothing verifiable found")
+            mc.log(f"  {name}: not found in free sources")
             continue
         row_filled = 0
         for field, payload in found.items():
@@ -272,7 +359,7 @@ def enrich_exhibitions(opts):
     if opts["dry_run"]:
         for miss, r, name, fields in targets:
             print(f"  • {name} (row {r}) — missing: {', '.join(l for _, l in fields)}")
-        print("\nDry-run: no Claude calls, no writes.")
+        print("\nDry-run: no lookups, no writes.")
         return 0
 
     ws_audit = ensure_audit_sheet(wb)
@@ -281,11 +368,7 @@ def enrich_exhibitions(opts):
     for _, r, name, fields in targets:
         ctx = {"Location": ws.cell(r, country_col).value}
         want = [lbl for _, lbl in fields]
-        try:
-            found = enrich_company(name + " (trade exhibition / conference)", ctx, want)
-        except mc.ClaudeUnavailable as e:
-            mc.log(f"Claude unavailable ({e}) — stopping exhibition enrichment.")
-            break
+        found = enrich_company(name, ctx, want)
         if not found:
             continue
         label_to_idx = {lbl: idx for idx, lbl in EXH_FIELDS.items()}

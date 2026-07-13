@@ -46,12 +46,18 @@ jobs:
 
       - name: Fetch market news
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # FREE engine. Set GROQ_API_KEY as a repo secret for AI summaries; if
+          # unset, the script auto-falls back to rule-based drafting (no key).
+          MIF_LLM_PROVIDER: ${{ vars.MIF_LLM_PROVIDER || 'auto' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/fetch_news.py --max-stories "${{ github.event.inputs.max_stories || '10' }}"
 
       - name: Enrich missing data
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MIF_LLM_PROVIDER: ${{ vars.MIF_LLM_PROVIDER || 'auto' }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python scripts/enrich_data.py \
             --limit "${{ github.event.inputs.enrich_limit || '10' }}" \

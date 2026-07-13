@@ -4,7 +4,7 @@ mif_common.py — shared configuration and helpers for the MIF portal automation
 
 Both fetch_news.py and enrich_data.py import from here so that file paths, the
 Excel schema contract, the de-duplication cache, provenance/flagging rules and
-the Claude client all live in exactly one place.
+the LLM provider layer all live in exactly one place.
 
 Design rules that the rest of the automation depends on:
   * The Excel files stay the single source of truth. Scripts only APPEND
@@ -12,8 +12,8 @@ Design rules that the rest of the automation depends on:
     a human has verified.
   * Every machine-written value carries a source URL and is flagged
     "Estimated" so a reviewer can tell auto-filled data from verified data.
-  * Nothing here prints secrets. The Anthropic key is read from the
-    ANTHROPIC_API_KEY environment variable only.
+  * Nothing here prints secrets. The free LLM key (GROQ_API_KEY or
+    GEMINI_API_KEY) is read from the environment only.
 """
 
 import os
@@ -173,53 +173,90 @@ INDUSTRY_RSS = [
 FX_URL = "https://api.frankfurter.app/latest?from=USD&to=INR"
 
 
-# ─── CLAUDE CLIENT (summarisation + web-search enrichment) ────────────────────
-CLAUDE_MODEL = os.environ.get("MIF_CLAUDE_MODEL", "claude-opus-4-8")
+# ─── LLM PROVIDER LAYER (free-only, pluggable) ────────────────────────────────
+# Which engine summarises the news / normalises enrichment fields. Resolved from
+# env: "groq" if GROQ_API_KEY set, "gemini" if GEMINI_API_KEY set, else "none"
+# (rule-based fallback, no network LLM call). Override with MIF_LLM_PROVIDER.
+# All calls use plain `requests` — no paid SDKs, no web-search tool (free tiers
+# lack it), so the model only ever sees text WE supply, keeping output grounded.
+import requests as _requests
 
-_WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
+              "{model}:generateContent")
 
 
-class ClaudeUnavailable(RuntimeError):
-    """Raised when no ANTHROPIC_API_KEY is configured."""
+class LLMUnavailable(RuntimeError):
+    """Raised when no free LLM key is configured; callers fall back to rules."""
 
 
-def get_claude():
-    """Lazily construct an Anthropic client. Raises ClaudeUnavailable if the
-    key is missing so callers can degrade gracefully in --dry-run / offline."""
-    key = os.environ.get("ANTHROPIC_API_KEY")
+def resolve_provider():
+    p = os.environ.get("MIF_LLM_PROVIDER", "auto").strip().lower()
+    if p in ("groq", "gemini", "none"):
+        return p
+    # auto
+    if os.environ.get("GROQ_API_KEY"):
+        return "groq"
+    if os.environ.get("GEMINI_API_KEY"):
+        return "gemini"
+    return "none"
+
+
+def llm_available():
+    return resolve_provider() != "none"
+
+
+def llm_json(prompt, system=None, max_tokens=4000):
+    """Send `prompt` to the configured FREE provider and parse JSON from the
+    reply. Raises LLMUnavailable when provider == 'none' (or the key is missing)
+    so the caller can drop to its rule-based path."""
+    provider = resolve_provider()
+    if provider == "groq":
+        text = _call_groq(prompt, system, max_tokens)
+    elif provider == "gemini":
+        text = _call_gemini(prompt, system, max_tokens)
+    else:
+        raise LLMUnavailable("no free LLM configured (MIF_LLM_PROVIDER=none)")
+    return _parse_json(text)
+
+
+def _call_groq(prompt, system, max_tokens):
+    key = os.environ.get("GROQ_API_KEY")
     if not key:
-        raise ClaudeUnavailable("ANTHROPIC_API_KEY is not set")
-    try:
-        import anthropic
-    except ImportError as e:
-        raise ClaudeUnavailable("anthropic SDK not installed") from e
-    return anthropic.Anthropic(api_key=key)
+        raise LLMUnavailable("GROQ_API_KEY is not set")
+    model = os.environ.get("MIF_LLM_MODEL", "llama-3.1-8b-instant")
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens,
+            "temperature": 0.2, "response_format": {"type": "json_object"}}
+    r = _requests.post(GROQ_URL, timeout=90,
+                       headers={"Authorization": f"Bearer {key}",
+                                "Content-Type": "application/json"},
+                       json=body)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
+
+
+def _call_gemini(prompt, system, max_tokens):
+    key = os.environ.get("GEMINI_API_KEY")
+    if not key:
+        raise LLMUnavailable("GEMINI_API_KEY is not set")
+    model = os.environ.get("MIF_LLM_MODEL", "gemini-2.5-flash")
+    url = GEMINI_URL.format(model=model)
+    body = {"contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2,
+                                 "responseMimeType": "application/json"}}
+    if system:
+        body["systemInstruction"] = {"parts": [{"text": system}]}
+    r = _requests.post(url, timeout=90, params={"key": key},
+                       headers={"Content-Type": "application/json"}, json=body)
+    r.raise_for_status()
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
-
-
-def claude_json(prompt, use_web_search=True, max_tokens=4000, system=None):
-    """Send `prompt` to Claude and parse a single JSON value out of the reply.
-
-    When use_web_search is True the server-side web_search tool is enabled so
-    the model can look facts up and cite real URLs. Returns the parsed JSON
-    (dict/list) or raises ValueError if no JSON could be extracted.
-    """
-    client = get_claude()
-    kwargs = dict(
-        model=CLAUDE_MODEL,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    if system:
-        kwargs["system"] = system
-    if use_web_search:
-        kwargs["tools"] = [_WEB_SEARCH_TOOL]
-
-    resp = client.messages.create(**kwargs)
-    text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    return _parse_json(text)
 
 
 def _parse_json(text):
